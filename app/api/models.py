@@ -118,19 +118,54 @@ class TickResponse(BaseModel):
 
 
 class ReplyRequest(BaseModel):
-    conversation_id: str = Field(min_length=1)
-    merchant_id: str = Field(min_length=1)
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+    conversation_id: str = Field(
+        min_length=1,
+    )
+
+    merchant_id: str = Field(
+        min_length=1,
+    )
+
     customer_id: str | None = None
-    from_role: str = Field(default="merchant")
-    message: str = Field(default="")
-    received_at: str = Field(default="")
-    turn_number: int = Field(default=1)
+
+    from_role: Literal[
+        "merchant",
+        "customer",
+    ]
+
+    message: str = Field(
+        min_length=1,
+        max_length=5000,
+    )
+
+    received_at: str = Field(
+        min_length=1,
+    )
+
+    turn_number: int = Field(
+        ge=1,
+    )
 
 
 class ReplyResponse(BaseModel):
-    action: str
+    action: Literal[
+        "send",
+        "wait",
+        "end",
+    ]
+
     body: str | None = None
+
     cta: str | None = None
-    wait_seconds: int | None = None
-    reason: str | None = None
+
+    wait_seconds: int | None = Field(
+        default=None,
+        ge=1,
+    )
+
+    rationale: str
 

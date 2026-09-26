@@ -44,27 +44,7 @@ def test_reply_hostile_opt_out(client: TestClient):
     assert response.status_code == 200
     data = response.json()
     assert data["action"] == "end"
-
-
-def test_reply_auto_reply_pattern(client: TestClient):
-    push_merchant(client)
-
-    response = client.post(
-        "/v1/reply",
-        json={
-            "conversation_id": "conv_auto_1",
-            "merchant_id": "m_001_dental",
-            "customer_id": None,
-            "from_role": "merchant",
-            "message": "Thank you for contacting us! Our team will respond shortly.",
-            "received_at": "2026-04-26T10:00:00Z",
-            "turn_number": 2,
-        },
-    )
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["action"] == "end"
+    assert data["rationale"]
 
 
 def test_reply_intent_transition(client: TestClient):
@@ -85,22 +65,22 @@ def test_reply_intent_transition(client: TestClient):
 
     assert response.status_code == 200
     data = response.json()
-    assert data["action"] in ("reply", "send")
-    assert data["cta"] is not None and len(data["cta"]) > 0
-    assert len(data["body"]) > 5
+    assert data["action"] == "send"
+    assert data["cta"]
+    assert data["rationale"]
 
 
-def test_reply_general_exploration(client: TestClient):
+def test_reply_wait_request(client: TestClient):
     push_merchant(client)
 
     response = client.post(
         "/v1/reply",
         json={
-            "conversation_id": "conv_general_1",
+            "conversation_id": "conv_wait",
             "merchant_id": "m_001_dental",
             "customer_id": None,
             "from_role": "merchant",
-            "message": "Can you explain how this campaign works?",
+            "message": "Let me think about it and get back to you.",
             "received_at": "2026-04-26T10:00:00Z",
             "turn_number": 2,
         },
@@ -108,5 +88,61 @@ def test_reply_general_exploration(client: TestClient):
 
     assert response.status_code == 200
     data = response.json()
-    assert data["action"] in ("reply", "send")
-    assert data["body"] is not None and len(data["body"]) > 5
+    assert data["action"] == "wait"
+    assert data["wait_seconds"] == 1800
+    assert data["rationale"]
+
+
+def test_reply_normal_action_is_send(client: TestClient):
+    push_merchant(client)
+
+    response = client.post(
+        "/v1/reply",
+        json={
+            "conversation_id": "conv_normal",
+            "merchant_id": "m_001_dental",
+            "customer_id": None,
+            "from_role": "merchant",
+            "message": "Sounds interesting.",
+            "received_at": "2026-04-26T10:00:00Z",
+            "turn_number": 2,
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["action"] == "send"
+    assert data["body"]
+    assert data["cta"]
+    assert data["rationale"]
+
+
+def test_reply_auto_reply_eventually_ends(client: TestClient):
+    push_merchant(client)
+
+    message = (
+        "Thank you for contacting us! "
+        "Our team will respond shortly."
+    )
+
+    for index in range(1, 4):
+        response = client.post(
+            "/v1/reply",
+            json={
+                "conversation_id": f"conv_auto_{index}",
+                "merchant_id": "m_001_dental",
+                "customer_id": None,
+                "from_role": "merchant",
+                "message": message,
+                "received_at": f"2026-04-26T10:0{index}:00Z",
+                "turn_number": 2,
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        if index < 3:
+            assert data["action"] == "wait"
+        else:
+            assert data["action"] == "end"

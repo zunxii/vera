@@ -118,11 +118,9 @@ def push_context(
     # ---------------------------------------------------------
 
     if body.scope not in store.VALID_SCOPES:
-        raise HTTPException(
-            status_code=(
-                status.HTTP_400_BAD_REQUEST
-            ),
-            detail={
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
                 "accepted": False,
                 "reason": "invalid_scope",
                 "details": (
@@ -223,6 +221,6 @@ def reply(
         body=decision.body,
         cta=decision.cta,
         wait_seconds=decision.wait_seconds,
-        reason=decision.reason,
+        rationale=decision.rationale,
     )
 

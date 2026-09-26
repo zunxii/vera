@@ -288,7 +288,7 @@ def test_invalid_scope_is_rejected(
     assert response.status_code == 400
 
     assert (
-        response.json()["detail"][
+        response.json()[
             "reason"
         ]
         == "invalid_scope"

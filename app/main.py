@@ -13,7 +13,9 @@ from app.core.conversation_store import ConversationStore
 from app.core.delivery_state import DeliveryState
 from app.core.tick_engine import TickEngine
 from app.llm.gemini import GeminiLLM
+from app.services.auto_reply_tracker import AutoReplyTracker
 from app.services.context_resolver import ContextResolver
+from app.services.decision_selector import DecisionSelector
 from app.services.fact_projector import FactProjector
 from app.services.reply_service import ReplyService
 from app.services.trigger_planner import TriggerPlanner
@@ -78,18 +80,23 @@ def create_app() -> FastAPI:
     composer_registry = ComposerRegistry(llm_composer=llm_composer)
     app.state.composer = composer_registry
 
+    decision_selector = DecisionSelector()
+    auto_reply_tracker = AutoReplyTracker()
+
     reply_service = ReplyService(
         context_store=store,
         conversation_store=conversation_store,
         resolver=context_resolver,
         projector=fact_projector,
         llm=llm if settings.gemini_api_key else None,
+        auto_reply_tracker=auto_reply_tracker,
     )
 
     app.state.tick_engine = TickEngine(
         context_store=store,
         delivery_state=delivery_state,
         composer_registry=composer_registry,
+        decision_selector=decision_selector,
     )
     app.state.reply_service = reply_service
 
