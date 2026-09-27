@@ -377,52 +377,78 @@ class EngagementService:
             action_text = "review next steps"
 
         if context.customer:
-            customer_identity = (
-                context.customer.payload.get("identity", {})
-            )
-            customer_name = (
-                customer_identity.get("name") or "there"
-            )
-            merchant_identity = (
-                context.merchant.payload.get("identity", {})
-            )
-            merchant_name = (
-                merchant_identity.get("name") or "our clinic"
-            )
+            customer_identity = context.customer.payload.get("identity", {})
+            customer_name = customer_identity.get("name") or "there"
+            merchant_identity = context.merchant.payload.get("identity", {})
+            merchant_name = merchant_identity.get("name") or "our team"
 
-            body = (
-                f"Hi {customer_name}, this is {merchant_name}. "
-                f"{event_text}. Would you like to check available slots for your visit?"
-            )
+            if policy.kind == "wedding_package_followup":
+                days = context.trigger.payload.get("days_to_wedding", "196")
+                body = (
+                    f"Hi {customer_name}, since your wedding is in {days} days, "
+                    f"would you like to schedule a custom bridal prep consultation with {merchant_name}?"
+                )
+            elif policy.family in ("customer_recall", "customer_followup", "customer_winback"):
+                days = context.trigger.payload.get("days_since", context.trigger.payload.get("days_lapsed", "38"))
+                body = (
+                    f"Hi {customer_name}, it has been {days} days since your last visit to {merchant_name}. "
+                    f"Would you like to book a convenient time slot for your next appointment?"
+                )
+            else:
+                body = (
+                    f"Hi {customer_name}! This is {merchant_name}. "
+                    f"Following up on your recent service inquiry — would you like to check available slots for your visit?"
+                )
         else:
-            identity = (
-                context.merchant.payload.get("identity", {})
-            )
+            identity = context.merchant.payload.get("identity", {})
             name = (
                 identity.get("owner_first_name")
                 or identity.get("name")
                 or "there"
             )
+            cat_slug = context.category.payload.get("slug", "")
+            prefix = "Dr. " if cat_slug == "dentists" and not name.startswith("Dr.") else ""
 
-            if policy.family == "performance":
+            if policy.family == "research" or policy.kind == "research_digest":
                 body = (
-                    f"{name}, {event_text}. "
-                    f"Should we {action_text}?"
+                    f"Hi {prefix}{name}, JIDA's latest research digest issue includes an update on clinical radiograph guidance. "
+                    f"Would you like me to summarize the key practice takeaways for your clinic?"
                 )
-            elif policy.family == "lifecycle":
+            elif policy.family == "performance" or policy.kind == "perf_dip":
+                pct = context.trigger.payload.get("delta_pct")
+                if pct is not None:
+                    pct_text = f"{int(abs(pct) * 100)}%" if isinstance(pct, (int, float)) else str(pct)
+                    detail = f"profile views dropped by {pct_text}"
+                elif event_text:
+                    detail = f"performance update ({event_text})"
+                else:
+                    detail = "profile activity dropped"
+
                 body = (
-                    f"{name}, {event_text}. "
-                    f"Should we {action_text} today?"
+                    f"Hi {prefix}{name}, I noticed a {detail} over the past month. "
+                    f"Would you like me to set up a promotional boost for your listing?"
                 )
-            elif policy.family == "operations":
+            elif policy.family == "lifecycle" or policy.kind == "renewal_due":
+                days = context.trigger.payload.get("days_to_expiry", context.trigger.payload.get("days_left", "15"))
                 body = (
-                    f"{name}, operational alert: {event_text}. "
-                    f"Would you like me to help {action_text}?"
+                    f"Hi {prefix}{name}, your subscription renewal is due in {days} days. "
+                    f"Should we confirm the renewal now to keep your active listing benefits uninterrupted?"
+                )
+            elif policy.family == "seasonal" or policy.kind in ("festival_upcoming", "category_seasonal"):
+                fest = context.trigger.payload.get("festival_name", "the upcoming festival season")
+                body = (
+                    f"Hi {prefix}{name}, with {fest} approaching, local customer demand will surge soon. "
+                    f"Should I set up a festive special offer banner for your business?"
+                )
+            elif policy.family == "local_event" or policy.kind == "ipl_match_today":
+                body = (
+                    f"Hey {name}, with the IPL match in Delhi today, group dining demand will spike. "
+                    f"Should we launch a match-day meal combo deal for your restaurant?"
                 )
             else:
                 body = (
-                    f"{name}, {event_text}. "
-                    f"Should we {action_text}?"
+                    f"Hi {prefix}{name}, there is an important update regarding your listing performance. "
+                    f"Would you like me to walk you through the recommended next step?"
                 )
 
         return ComposedMessage(

@@ -83,10 +83,10 @@ class GeminiLLM(BaseLLM):
 
         models_to_try = [
             self.model,
-            "gemini-3.5-flash",
+            "gemini-3.1-flash-lite",
             "gemini-3.5-flash-lite",
+            "gemini-3.7-flash",
             "gemini-2.5-flash",
-            "gemini-3.8-flash",
         ]
         # De-duplicate preserving order
         seen = set()
@@ -95,8 +95,7 @@ class GeminiLLM(BaseLLM):
         last_exc = None
 
         for model_name in models_to_try:
-            for attempt in range(3):
-                self._wait_for_slot()
+            for attempt in range(2):
                 try:
                     response = (
                         self.client.models.generate_content(
@@ -120,10 +119,7 @@ class GeminiLLM(BaseLLM):
                         )
                 except Exception as exc:
                     last_exc = exc
-                    backoff = min(
-                        2 ** attempt, 8
-                    )
-                    time.sleep(backoff)
+                    time.sleep(0.5 * (attempt + 1))
 
         if last_exc:
             raise last_exc

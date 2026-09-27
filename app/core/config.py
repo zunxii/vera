@@ -43,9 +43,19 @@ class Settings:
         if member.strip()
     )
 
+    groq_api_key: str = os.getenv(
+        "GROQ_API_KEY",
+        "",
+    )
+
+    groq_model: str = os.getenv(
+        "GROQ_MODEL",
+        "qwen/qwen3.8-27b",
+    )
+
     model: str = os.getenv(
         "VERA_MODEL",
-        "gemini-2.5-flash",
+        "qwen/qwen3.8-27b",
     )
 
     gemini_api_key: str = os.getenv(
@@ -55,12 +65,12 @@ class Settings:
 
     gemini_model: str = os.getenv(
         "GEMINI_MODEL",
-        "gemini-2.5-flash",
+        "gemini-3.5-flash",
     )
 
     approach: str = os.getenv(
         "VERA_APPROACH",
-        "4-context architecture with fact selection and Gemini structured-output composition",
+        "4-context architecture with fact selection and Groq high-speed structured-output composition",
     )
 
     contact_email: str = os.getenv(

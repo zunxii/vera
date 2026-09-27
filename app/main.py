@@ -12,6 +12,7 @@ from app.core.delivery_state import DeliveryState
 from app.core.tick_engine import TickEngine
 from app.llm.fallback import FallbackLLM
 from app.llm.gemini import GeminiLLM
+from app.llm.groq import GroqLLM
 from app.services.auto_reply_tracker import AutoReplyTracker
 from app.services.context_resolver import ContextResolver
 from app.services.decision_selector import DecisionSelector
@@ -68,7 +69,12 @@ def create_app() -> FastAPI:
     if settings.gemini_api_key:
         llm = GeminiLLM(
             api_key=settings.gemini_api_key,
-            model=settings.gemini_model,
+            model="gemini-3.1-flash-lite",
+        )
+    elif settings.groq_api_key:
+        llm = GroqLLM(
+            api_key=settings.groq_api_key,
+            model=settings.groq_model,
         )
     else:
         llm = FallbackLLM()

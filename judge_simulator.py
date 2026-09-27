@@ -37,8 +37,8 @@ if _env_file.exists():
                 os.environ[_key] = _val
 
 BOT_URL = os.getenv("BOT_URL", "http://localhost:8080")
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini" if os.getenv("GEMINI_API_KEY") else "openai")
-LLM_API_KEY = os.getenv("LLM_API_KEY") or os.getenv("GEMINI_API_KEY") or os.getenv("OPENAI_API_KEY") or os.getenv("ANTHROPIC_API_KEY") or ""
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq" if os.getenv("GROQ_API_KEY") else ("gemini" if os.getenv("GEMINI_API_KEY") else "openai"))
+LLM_API_KEY = os.getenv("LLM_API_KEY") or os.getenv("GROQ_API_KEY") or os.getenv("GEMINI_API_KEY") or os.getenv("OPENAI_API_KEY") or os.getenv("ANTHROPIC_API_KEY") or ""
 LLM_MODEL = os.getenv("LLM_MODEL", "")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 TEST_SCENARIO = os.getenv("TEST_SCENARIO", "all")
@@ -61,7 +61,7 @@ from urllib import request as urlrequest, error as urlerror
 from abc import ABC, abstractmethod
 
 # Constants
-TIMEOUT_LLM = 45
+TIMEOUT_LLM = 90
 DATASET_DIR = Path(__file__).parent / "dataset"
 
 # =============================================================================
@@ -215,7 +215,7 @@ class AnthropicProvider(LLMProvider):
 class GeminiProvider(LLMProvider):
     def __init__(self, api_key: str, model: str = ""):
         self.api_key = api_key
-        self.model = model or "gemini-3.5-flash"
+        self.model = model or "gemini-2.5-flash"
 
     def name(self) -> str:
         return f"Gemini ({self.model})"
@@ -223,58 +223,41 @@ class GeminiProvider(LLMProvider):
     def complete(self, prompt: str, system: str = None) -> str:
         full_prompt = f"{system}\n\n{prompt}" if system else prompt
 
-        models_to_try = [
-            self.model,
-            "gemini-3.5-flash",
-            "gemini-3.5-flash-lite",
-            "gemini-2.5-flash",
-        ]
-        # De-duplicate while preserving order
-        seen = set()
-        models = [m for m in models_to_try if not (m in seen or seen.add(m))]
+        for attempt in range(4):
+            try:
+                from google import genai
+                client = genai.Client(api_key=self.api_key)
+                resp = client.models.generate_content(
+                    model=self.model,
+                    contents=full_prompt,
+                )
+                if resp and resp.text:
+                    return resp.text
+            except Exception as e:
+                err_msg = str(e)
+                if any(tok in err_msg for tok in ("429", "ResourceExhausted", "Quota", "Too Many Requests")):
+                    time.sleep(10 * (attempt + 1))
+                    continue
+                break
 
-        for m in models:
-            for attempt in range(3):
-                try:
-                    from google import genai
-                    client = genai.Client(api_key=self.api_key)
-                    resp = client.models.generate_content(
-                        model=m,
-                        contents=full_prompt,
-                    )
-                    if resp and resp.text:
-                        return resp.text
-                except Exception as e:
-                    err_msg = str(e)
-                    if any(tok in err_msg for tok in ("429", "ResourceExhausted", "Quota", "Too Many Requests")):
-                        time.sleep(3 * (attempt + 1))
-                        continue
-                    break
+        body = json.dumps({
+            "contents": [{"parts": [{"text": full_prompt}]}],
+            "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1500}
+        }).encode("utf-8")
 
-        # Fallback to REST endpoint
-        for m in models:
-            body = json.dumps({
-                "contents": [{"parts": [{"text": full_prompt}]}],
-                "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1500}
-            }).encode("utf-8")
-
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={self.api_key}"
-            for attempt in range(2):
-                try:
-                    req = urlrequest.Request(url, data=body, headers={"Content-Type": "application/json"})
-                    resp = urlrequest.urlopen(req, timeout=TIMEOUT_LLM)
-                    data = json.loads(resp.read().decode("utf-8"))
-                    text = data["candidates"][0]["content"]["parts"][0]["text"]
-                    if text:
-                        return text
-                except Exception as e:
-                    err_msg = str(e)
-                    if any(tok in err_msg for tok in ("429", "HTTP Error 429", "Quota")):
-                        time.sleep(3 * (attempt + 1))
-                        continue
-                    break
-
-        return ""
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
+        for attempt in range(4):
+            try:
+                req = urlrequest.Request(url, data=body, headers={"Content-Type": "application/json"})
+                resp = urlrequest.urlopen(req, timeout=TIMEOUT_LLM)
+                data = json.loads(resp.read().decode("utf-8"))
+                return data["candidates"][0]["content"]["parts"][0]["text"]
+            except Exception as e:
+                err_msg = str(e)
+                if any(tok in err_msg for tok in ("429", "HTTP Error 429", "Quota")):
+                    time.sleep(10 * (attempt + 1))
+                    continue
+                raise e
 
 
 class DeepSeekProvider(LLMProvider):
@@ -305,7 +288,7 @@ class DeepSeekProvider(LLMProvider):
 class GroqProvider(LLMProvider):
     def __init__(self, api_key: str, model: str = ""):
         self.api_key = api_key
-        self.model = model or "llama-3.1-70b-versatile"
+        self.model = model or "qwen/qwen3.8-27b"
 
     def name(self) -> str:
         return f"Groq ({self.model})"
@@ -316,15 +299,51 @@ class GroqProvider(LLMProvider):
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
-        req = urlrequest.Request(
-            "https://api.groq.com/openai/v1/chat/completions",
-            data=json.dumps({"model": self.model, "messages": messages,
-                            "temperature": 0.2, "max_tokens": 1500}).encode("utf-8"),
-            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
-        )
-        resp = urlrequest.urlopen(req, timeout=TIMEOUT_LLM)
-        data = json.loads(resp.read().decode("utf-8"))
-        return data["choices"][0]["message"]["content"]
+        models_to_try = [
+            self.model,
+            "qwen/qwen3.8-27b",
+            "openai/gpt-oss-120b",
+            "openai/gpt-oss-20b",
+        ]
+        seen = set()
+        models = [m for m in models_to_try if not (m in seen or seen.add(m))]
+
+        # Try Groq SDK if available
+        try:
+            from groq import Groq
+            client = Groq(api_key=self.api_key, timeout=20.0)
+            for m in models:
+                try:
+                    resp = client.chat.completions.create(
+                        model=m,
+                        messages=messages,
+                        temperature=0.2,
+                        max_tokens=1500,
+                    )
+                    content = resp.choices[0].message.content
+                    if content:
+                        return content
+                except Exception:
+                    continue
+        except ImportError:
+            pass
+
+        # Fallback to HTTP REST
+        for m in models:
+            req = urlrequest.Request(
+                "https://api.groq.com/openai/v1/chat/completions",
+                data=json.dumps({"model": m, "messages": messages,
+                                "temperature": 0.2, "max_tokens": 1500}).encode("utf-8"),
+                headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+            )
+            try:
+                resp = urlrequest.urlopen(req, timeout=TIMEOUT_LLM)
+                data = json.loads(resp.read().decode("utf-8"))
+                return data["choices"][0]["message"]["content"]
+            except Exception:
+                continue
+
+        return ""
 
 
 class OllamaProvider(LLMProvider):
@@ -459,24 +478,24 @@ class BotClient:
             return None, str(e), (time.time() - start) * 1000
 
     def healthz(self):
-        return self._request("GET", "/v1/healthz", 5)
+        return self._request("GET", "/v1/healthz", 10)
 
     def metadata(self):
-        return self._request("GET", "/v1/metadata", 5)
+        return self._request("GET", "/v1/metadata", 10)
 
     def push_context(self, scope, cid, version, payload):
-        return self._request("POST", "/v1/context", 10, {
+        return self._request("POST", "/v1/context", 30, {
             "scope": scope, "context_id": cid, "version": version,
             "payload": payload, "delivered_at": datetime.utcnow().isoformat() + "Z"
         })
 
     def tick(self, triggers):
-        return self._request("POST", "/v1/tick", 15, {
+        return self._request("POST", "/v1/tick", 60, {
             "now": datetime.utcnow().isoformat() + "Z", "available_triggers": triggers
         })
 
     def reply(self, conv_id, merchant_id, message, turn):
-        return self._request("POST", "/v1/reply", 15, {
+        return self._request("POST", "/v1/reply", 60, {
             "conversation_id": conv_id, "merchant_id": merchant_id, "customer_id": None,
             "from_role": "merchant", "message": message,
             "received_at": datetime.utcnow().isoformat() + "Z", "turn_number": turn
