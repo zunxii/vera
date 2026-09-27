@@ -3,12 +3,15 @@ from __future__ import annotations
 from typing import Any
 from uuid import uuid4
 
-from app.composers.registry import ComposerRegistry
 from app.core.context_store import ContextStore
 from app.core.delivery_state import DeliveryState
+from app.llm.fallback import FallbackLLM
 from app.services.context_resolver import ContextResolver
 from app.services.decision_selector import DecisionSelector
+from app.services.engagement_service import EngagementService
 from app.services.fact_projector import FactProjector
+from app.services.message_validator import MessageValidator
+from app.services.signal_selector import SignalSelector
 from app.services.suppression_service import SuppressionService
 from app.services.trigger_planner import TriggerPlanner
 from app.services.validation_service import ValidationService
@@ -28,7 +31,9 @@ class TickEngine:
             ↓
         FactProjector
             ↓
-        ComposerRegistry
+        SignalSelector
+            ↓
+        EngagementService
             ↓
         Action validation
             ↓
@@ -42,9 +47,10 @@ class TickEngine:
         resolver: ContextResolver | None = None,
         planner: TriggerPlanner | None = None,
         projector: FactProjector | None = None,
-        composer_registry: ComposerRegistry | None = None,
+        engagement_service: EngagementService | None = None,
         suppression_service: SuppressionService | None = None,
         decision_selector: DecisionSelector | None = None,
+        signal_selector: SignalSelector | None = None,
     ) -> None:
 
         self.context_store = context_store
@@ -73,9 +79,12 @@ class TickEngine:
             or FactProjector()
         )
 
-        self.registry = (
-            composer_registry
-            or ComposerRegistry()
+        self.engagement_service = (
+            engagement_service
+            or EngagementService(
+                llm=FallbackLLM(),
+                validator=MessageValidator(),
+            )
         )
 
         self.suppression_service = (
@@ -88,6 +97,11 @@ class TickEngine:
         self.decision_selector = (
             decision_selector
             or DecisionSelector()
+        )
+
+        self.signal_selector = (
+            signal_selector
+            or SignalSelector()
         )
 
     def process_tick(
@@ -113,12 +127,7 @@ class TickEngine:
             )
         )
 
-        actions: list[
-            dict[str, Any]
-        ] = []
-
-        for item in selected:
-
+        def _compose_item(item):
             context = item.context
             policy = item.policy
 
@@ -127,16 +136,44 @@ class TickEngine:
                 specs=policy.facts,
             )
 
+            selection = self.signal_selector.select(
+                context=context,
+                policy=policy,
+                facts=facts,
+            )
+
+            focused_facts = selection.focus(
+                facts
+            )
+
             composed = (
-                self.registry.compose(
+                self.engagement_service.compose(
                     context=context,
                     policy=policy,
-                    facts=facts,
+                    facts=focused_facts,
+                    signal=selection,
                 )
             )
 
+            return (item, composed)
+
+        if len(selected) > 1:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=min(len(selected), 8)) as executor:
+                results = list(executor.map(_compose_item, selected))
+        else:
+            results = [_compose_item(item) for item in selected]
+
+        actions: list[
+            dict[str, Any]
+        ] = []
+
+        for item, composed in results:
+
             if composed is None:
                 continue
+
+            context = item.context
 
             merchant_id = (
                 context.merchant.payload.get(

@@ -17,18 +17,4 @@ class FallbackLLM(BaseLLM):
         self,
         prompt: str,
     ) -> LLMMessageDraft:
-
-        return LLMMessageDraft(
-            body=(
-                "I spotted an update relevant to your business. "
-                "Want me to unpack what it means and suggest "
-                "the next step?"
-            ),
-            cta="open_ended",
-            used_fact_ids=[],
-            template_params=[],
-            rationale=(
-                "Fallback response used because the LLM "
-                "provider was unavailable."
-            ),
-        )
+        raise RuntimeError("LLM provider unavailable")

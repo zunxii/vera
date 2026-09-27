@@ -37,27 +37,46 @@ class GeminiLLM(BaseLLM):
         prompt: str,
     ) -> LLMMessageDraft:
 
-        response = (
-            self.client.models.generate_content(
-                model=self.model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type=(
-                        "application/json"
-                    ),
-                    response_schema=(
-                        LLMMessageDraft
-                    ),
-                    temperature=0.2,
-                ),
-            )
-        )
+        from time import sleep
 
-        if not response.text:
-            raise RuntimeError(
-                "Gemini returned an empty response."
-            )
+        models_to_try = [
+            self.model,
+            "gemini-3.8-flash",
+            "gemini-3.5-flash-lite",
+        ]
 
-        return LLMMessageDraft.model_validate_json(
-            response.text
+        last_exc = None
+
+        for model_name in models_to_try:
+            for attempt in range(3):
+                try:
+                    response = (
+                        self.client.models.generate_content(
+                            model=model_name,
+                            contents=prompt,
+                            config=types.GenerateContentConfig(
+                                response_mime_type=(
+                                    "application/json"
+                                ),
+                                response_schema=(
+                                    LLMMessageDraft
+                                ),
+                                temperature=0.2,
+                            ),
+                        )
+                    )
+
+                    if response and response.text:
+                        return LLMMessageDraft.model_validate_json(
+                            response.text
+                        )
+                except Exception as exc:
+                    last_exc = exc
+                    sleep(1.0)
+
+        if last_exc:
+            raise last_exc
+
+        raise RuntimeError(
+            "Gemini returned an empty response."
         )

@@ -5,19 +5,21 @@ import time
 from fastapi import FastAPI
 
 from app.api.routes import router
-from app.composers.llm_composer import LLMComposer
-from app.composers.registry import ComposerRegistry
 from app.core.config import Settings
 from app.core.context_store import ContextStore
 from app.core.conversation_store import ConversationStore
 from app.core.delivery_state import DeliveryState
 from app.core.tick_engine import TickEngine
+from app.llm.fallback import FallbackLLM
 from app.llm.gemini import GeminiLLM
 from app.services.auto_reply_tracker import AutoReplyTracker
 from app.services.context_resolver import ContextResolver
 from app.services.decision_selector import DecisionSelector
+from app.services.engagement_service import EngagementService
 from app.services.fact_projector import FactProjector
+from app.services.message_validator import MessageValidator
 from app.services.reply_service import ReplyService
+from app.services.signal_selector import SignalSelector
 from app.services.trigger_planner import TriggerPlanner
 from app.services.validation_service import ValidationService
 
@@ -61,26 +63,24 @@ def create_app() -> FastAPI:
     app.state.trigger_planner = trigger_planner
 
     # ---------------------------------------------------------
-    # LLM Initialization
+    # LLM & Composition Initialization
     # ---------------------------------------------------------
-    validator = ValidationService()
-
     if settings.gemini_api_key:
         llm = GeminiLLM(
             api_key=settings.gemini_api_key,
             model=settings.gemini_model,
         )
-        llm_composer = LLMComposer(
-            llm=llm,
-            validator=validator,
-        )
     else:
-        llm_composer = None
+        llm = FallbackLLM()
 
-    composer_registry = ComposerRegistry(llm_composer=llm_composer)
-    app.state.composer = composer_registry
+    engagement_service = EngagementService(
+        llm=llm,
+        validator=MessageValidator(),
+    )
+    app.state.engagement_service = engagement_service
 
     decision_selector = DecisionSelector()
+    signal_selector = SignalSelector()
     auto_reply_tracker = AutoReplyTracker()
 
     reply_service = ReplyService(
@@ -88,15 +88,16 @@ def create_app() -> FastAPI:
         conversation_store=conversation_store,
         resolver=context_resolver,
         projector=fact_projector,
-        llm=llm if settings.gemini_api_key else None,
+        llm=llm,
         auto_reply_tracker=auto_reply_tracker,
     )
 
     app.state.tick_engine = TickEngine(
         context_store=store,
         delivery_state=delivery_state,
-        composer_registry=composer_registry,
+        engagement_service=engagement_service,
         decision_selector=decision_selector,
+        signal_selector=signal_selector,
     )
     app.state.reply_service = reply_service
 

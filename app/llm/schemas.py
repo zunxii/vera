@@ -20,7 +20,10 @@ class LLMMessageDraft(BaseModel):
     cta: str = Field(
         min_length=1,
         max_length=100,
-        description="One clear call to action.",
+        description=(
+            "Must be EXACTLY one of: "
+            "'open_ended', 'binary_yes_no', 'multi_choice_slot', 'action'."
+        ),
     )
 
     used_fact_ids: list[str] = Field(

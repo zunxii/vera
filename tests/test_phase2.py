@@ -132,7 +132,7 @@ def test_tick_merchant_trigger(client: TestClient):
     assert action["customer_id"] is None
     assert action["send_as"] == "vera"
     assert action["trigger_id"] == "trg_001_research_digest"
-    assert action["template_name"] == "research_digest"
+    assert action["template_name"] == "vera_engagement_v1"
     assert "Meera" in action["body"]
     assert action["suppression_key"] == "research:dentists:2026-W17"
     assert action["cta"] is not None and len(action["cta"]) > 0

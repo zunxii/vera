@@ -1,10 +1,12 @@
-from app.composers.llm_composer import LLMComposer
 from app.core.context_store import StoredContext
 from app.domain.context import ContextBundle
+from app.domain.signal import SignalSelection
 from app.llm.fallback import FallbackLLM
 from app.llm.schemas import LLMMessageDraft
 from app.policies.triggers import get_policy
+from app.services.engagement_service import EngagementService
 from app.services.fact_projector import Fact, FactProjector
+from app.services.message_validator import MessageValidator
 from app.services.validation_service import ValidationService
 
 
@@ -133,9 +135,9 @@ def test_validator_rejects_taboo_words():
 
 def test_llm_composer_fallback():
     fallback_llm = FallbackLLM()
-    validator = ValidationService()
+    validator = MessageValidator()
 
-    composer = LLMComposer(
+    service = EngagementService(
         llm=fallback_llm,
         validator=validator,
     )
@@ -177,8 +179,18 @@ def test_llm_composer_fallback():
 
     projector = FactProjector()
     facts = projector.project(context, policy.facts)
+    signal = SignalSelection(
+        primary_fact_id=facts[0].id,
+        supporting_fact_ids=(),
+        reason="test",
+    )
 
-    msg = composer.compose(context, policy, facts)
+    msg = service.compose(
+        context=context,
+        policy=policy,
+        facts=facts,
+        signal=signal,
+    )
     assert msg is not None
     assert msg.send_as == "vera"
-    assert "I spotted an update" in msg.body
+    assert "Test Merchant" in msg.body
