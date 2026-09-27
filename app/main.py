@@ -66,17 +66,28 @@ def create_app() -> FastAPI:
     # ---------------------------------------------------------
     # LLM & Composition Initialization
     # ---------------------------------------------------------
-    if settings.gemini_api_key:
-        llm = GeminiLLM(
-            api_key=settings.gemini_api_key,
-            model="gemini-3.1-flash-lite",
-        )
-    elif settings.groq_api_key:
-        llm = GroqLLM(
-            api_key=settings.groq_api_key,
-            model=settings.groq_model,
-        )
-    else:
+    llm = None
+    if settings.groq_api_key:
+        try:
+            from app.llm.groq import GroqLLM
+            llm = GroqLLM(
+                api_key=settings.groq_api_key,
+                model=settings.groq_model,
+            )
+        except Exception:
+            pass
+
+    if llm is None and settings.gemini_api_key:
+        try:
+            from app.llm.gemini import GeminiLLM
+            llm = GeminiLLM(
+                api_key=settings.gemini_api_key,
+                model="gemini-3.1-flash-lite",
+            )
+        except Exception:
+            pass
+
+    if llm is None:
         llm = FallbackLLM()
 
     engagement_service = EngagementService(
