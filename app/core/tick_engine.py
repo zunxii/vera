@@ -157,12 +157,7 @@ class TickEngine:
 
             return (item, composed)
 
-        if len(selected) > 1:
-            from concurrent.futures import ThreadPoolExecutor
-            with ThreadPoolExecutor(max_workers=min(len(selected), 8)) as executor:
-                results = list(executor.map(_compose_item, selected))
-        else:
-            results = [_compose_item(item) for item in selected]
+        results = [_compose_item(item) for item in selected]
 
         actions: list[
             dict[str, Any]

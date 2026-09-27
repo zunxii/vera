@@ -194,6 +194,12 @@ class EngagementService:
             context
         )
 
+        primary_fact_text = (
+            f"{signal.candidate.event}. ({signal.candidate.implication})"
+            if signal.candidate
+            else primary.value
+        )
+
         return MessageBrief(
             audience=(
                 "customer"
@@ -210,7 +216,7 @@ class EngagementService:
             ),
             trigger_family=policy.family,
             primary_fact_id=primary.id,
-            primary_fact=primary.value,
+            primary_fact=primary_fact_text,
             supporting_facts=supporting,
             cta=policy.cta,
             engagement_levers=(
@@ -360,97 +366,63 @@ class EngagementService:
         brief: MessageBrief,
     ) -> ComposedMessage:
 
-        by_id = {
-            fact.id: fact
-            for fact in facts
-        }
-
-        primary = by_id.get(
-            signal.primary_fact_id
-        )
-
-        signal_text = (
-            primary.value
-            if primary
-            else "a relevant signal"
-        )
+        by_id = {fact.id: fact for fact in facts}
+        cand = signal.candidate
+        if cand:
+            event_text = cand.event
+            action_text = cand.action
+        else:
+            primary = by_id.get(signal.primary_fact_id)
+            event_text = primary.value if primary else "a business update"
+            action_text = "review next steps"
 
         if context.customer:
             customer_identity = (
-                context.customer.payload.get(
-                    "identity",
-                    {},
-                )
+                context.customer.payload.get("identity", {})
             )
             customer_name = (
-                customer_identity.get(
-                    "name"
-                )
-                or "there"
+                customer_identity.get("name") or "there"
             )
-
             merchant_identity = (
-                context.merchant.payload.get(
-                    "identity",
-                    {},
-                )
+                context.merchant.payload.get("identity", {})
             )
             merchant_name = (
-                merchant_identity.get(
-                    "name"
-                )
-                or "our clinic"
+                merchant_identity.get("name") or "our clinic"
             )
 
             body = (
                 f"Hi {customer_name}, this is {merchant_name}. "
-                f"I'm following up regarding {signal_text}. "
-                f"Would you like to pick a time slot for your visit?"
+                f"{event_text}. Would you like to check available slots for your visit?"
             )
         else:
             identity = (
-                context.merchant.payload.get(
-                    "identity",
-                    {},
-                )
+                context.merchant.payload.get("identity", {})
             )
-
             name = (
-                identity.get(
-                    "owner_first_name"
-                )
-                or identity.get(
-                    "name"
-                )
+                identity.get("owner_first_name")
+                or identity.get("name")
                 or "there"
             )
 
             if policy.family == "performance":
                 body = (
-                    f"{name}, I spotted this performance signal: "
-                    f"{signal_text}. "
-                    f"Want me to work through the next step?"
+                    f"{name}, {event_text}. "
+                    f"Should we {action_text}?"
                 )
-
             elif policy.family == "lifecycle":
                 body = (
-                    f"{name}, there's a time-sensitive update: "
-                    f"{signal_text}. "
-                    f"Want me to help with the next step?"
+                    f"{name}, {event_text}. "
+                    f"Should we {action_text} today?"
                 )
-
             elif policy.family == "operations":
                 body = (
-                    f"{name}, there's an operational alert: "
-                    f"{signal_text}. "
-                    f"Want me to help with the immediate action?"
+                    f"{name}, operational alert: {event_text}. "
+                    f"Would you like me to help {action_text}?"
                 )
-
             else:
                 body = (
-                    f"{name}, I spotted something relevant: "
-                    f"{signal_text}. "
-                    f"Want me to unpack the next step?"
+                    f"{name}, {event_text}. "
+                    f"Should we {action_text}?"
                 )
 
         return ComposedMessage(

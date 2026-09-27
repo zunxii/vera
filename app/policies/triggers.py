@@ -374,6 +374,20 @@ POLICIES: dict[str, TriggerPolicy] = {
     # Customer
     # ---------------------------------------------------------
 
+    "appointment_tomorrow": _customer(
+        "appointment_tomorrow",
+        "customer_recall",
+        90,
+        cta="multi_choice_slot",
+    ),
+
+    "customer_lapsed_soft": _customer(
+        "customer_lapsed_soft",
+        "customer_winback",
+        65,
+        cta="binary_yes_no",
+    ),
+
     "recall_due": _customer(
         "recall_due",
         "customer_recall",

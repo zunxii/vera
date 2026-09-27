@@ -135,6 +135,7 @@ class ScoreResult:
     penalties: int = 0
     penalty_reasons: List[str] = field(default_factory=list)
     hint: str = ""
+    is_fallback: bool = False
 
     @property
     def total(self) -> int:
@@ -214,35 +215,66 @@ class AnthropicProvider(LLMProvider):
 class GeminiProvider(LLMProvider):
     def __init__(self, api_key: str, model: str = ""):
         self.api_key = api_key
-        self.model = model or "gemini-2.5-flash"
+        self.model = model or "gemini-3.5-flash"
 
     def name(self) -> str:
         return f"Gemini ({self.model})"
 
     def complete(self, prompt: str, system: str = None) -> str:
         full_prompt = f"{system}\n\n{prompt}" if system else prompt
-        try:
-            from google import genai
-            client = genai.Client(api_key=self.api_key)
-            resp = client.models.generate_content(
-                model=self.model,
-                contents=full_prompt,
-            )
-            if resp and resp.text:
-                return resp.text
-        except Exception:
-            pass
 
-        body = json.dumps({
-            "contents": [{"parts": [{"text": full_prompt}]}],
-            "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1500}
-        }).encode("utf-8")
+        models_to_try = [
+            self.model,
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-2.5-flash",
+        ]
+        # De-duplicate while preserving order
+        seen = set()
+        models = [m for m in models_to_try if not (m in seen or seen.add(m))]
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
-        req = urlrequest.Request(url, data=body, headers={"Content-Type": "application/json"})
-        resp = urlrequest.urlopen(req, timeout=TIMEOUT_LLM)
-        data = json.loads(resp.read().decode("utf-8"))
-        return data["candidates"][0]["content"]["parts"][0]["text"]
+        for m in models:
+            for attempt in range(3):
+                try:
+                    from google import genai
+                    client = genai.Client(api_key=self.api_key)
+                    resp = client.models.generate_content(
+                        model=m,
+                        contents=full_prompt,
+                    )
+                    if resp and resp.text:
+                        return resp.text
+                except Exception as e:
+                    err_msg = str(e)
+                    if any(tok in err_msg for tok in ("429", "ResourceExhausted", "Quota", "Too Many Requests")):
+                        time.sleep(3 * (attempt + 1))
+                        continue
+                    break
+
+        # Fallback to REST endpoint
+        for m in models:
+            body = json.dumps({
+                "contents": [{"parts": [{"text": full_prompt}]}],
+                "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1500}
+            }).encode("utf-8")
+
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={self.api_key}"
+            for attempt in range(2):
+                try:
+                    req = urlrequest.Request(url, data=body, headers={"Content-Type": "application/json"})
+                    resp = urlrequest.urlopen(req, timeout=TIMEOUT_LLM)
+                    data = json.loads(resp.read().decode("utf-8"))
+                    text = data["candidates"][0]["content"]["parts"][0]["text"]
+                    if text:
+                        return text
+                except Exception as e:
+                    err_msg = str(e)
+                    if any(tok in err_msg for tok in ("429", "HTTP Error 429", "Quota")):
+                        time.sleep(3 * (attempt + 1))
+                        continue
+                    break
+
+        return ""
 
 
 class DeepSeekProvider(LLMProvider):
@@ -591,7 +623,8 @@ Score each dimension 0-10 with clear reasoning. Be STRICT."""
             merchant_fit=5, merchant_fit_reason="Could not evaluate",
             decision_quality=5, decision_quality_reason="Could not evaluate",
             engagement_compulsion=5, engagement_reason="Could not evaluate",
-            hint="LLM scoring failed - using basic heuristics"
+            hint="LLM scoring failed - using basic heuristics",
+            is_fallback=True,
         )
 
 # =============================================================================
@@ -677,6 +710,8 @@ class JudgeSimulator:
         trigs = list(self.dataset.triggers.keys())[:3]
         for tid in trigs:
             self.client.push_context("trigger", tid, 1, self.dataset.triggers[tid])
+        for cid, c in self.dataset.customers.items():
+            self.client.push_context("customer", cid, 1, c)
 
         data, err, lat = self.client.tick(trigs)
         if err:
@@ -823,6 +858,8 @@ class JudgeSimulator:
 
         for mid, m in self.dataset.merchants.items():
             self.client.push_context("merchant", mid, 1, m)
+        for cid, c in self.dataset.customers.items():
+            self.client.push_context("customer", cid, 1, c)
         for tid, t in self.dataset.triggers.items():
             self.client.push_context("trigger", tid, 1, t)
 
@@ -901,6 +938,9 @@ class JudgeSimulator:
         print_section("FINAL SUMMARY")
 
         n = len(self.all_scores)
+        clean = [s for s in self.all_scores if not getattr(s, "is_fallback", False)]
+        failures = n - len(clean)
+
         avg = ScoreResult(
             specificity=sum(s.specificity for s in self.all_scores) // n,
             category_fit=sum(s.category_fit for s in self.all_scores) // n,
@@ -910,7 +950,22 @@ class JudgeSimulator:
             penalties=sum(s.penalties for s in self.all_scores)
         )
 
-        print_info(f"Messages scored: {n}\n")
+        print_info(f"Messages generated: {n}")
+        print_info(f"Messages successfully judged: {len(clean)}")
+        print_info(f"Judge failures (fallbacks used): {failures}\n")
+
+        if clean:
+            cn = len(clean)
+            c_avg = ScoreResult(
+                specificity=sum(s.specificity for s in clean) // cn,
+                category_fit=sum(s.category_fit for s in clean) // cn,
+                merchant_fit=sum(s.merchant_fit for s in clean) // cn,
+                decision_quality=sum(s.decision_quality for s in clean) // cn,
+                engagement_compulsion=sum(s.engagement_compulsion for s in clean) // cn,
+            )
+            c_tot = c_avg.total
+            c_pct = (c_tot / 50) * 100
+            print_info(f"EFFECTIVE SCORED SAMPLE AVERAGE: {c_tot}/50 ({c_pct:.1f}%)\n")
 
         print_score_bar("Avg Specificity", avg.specificity)
         print_score_bar("Avg Category Fit", avg.category_fit)
@@ -921,7 +976,7 @@ class JudgeSimulator:
         total = avg.total
         pct = (total / 50) * 100
 
-        print(f"\n{Colors.BOLD}  AVERAGE SCORE: {total}/50 ({pct:.0f}%){Colors.RESET}")
+        print(f"\n{Colors.BOLD}  OVERALL AVERAGE SCORE: {total}/50 ({pct:.0f}%){Colors.RESET}")
 
         if pct >= 80:
             print(f"\n  {Colors.GREEN}EXCELLENT{Colors.RESET}")
