@@ -17,20 +17,12 @@ class GeminiLLM(BaseLLM):
 
     The model is forced to return the Pydantic schema
     defined by LLMMessageDraft.
-
-    Rate-limited to 6 requests per minute (shared across
-    all threads) to stay under the free-tier quota.
     """
-
-    _RPM = 6
-    _WINDOW = 60.0
-    _lock = threading.Lock()
-    _timestamps: deque[float] = deque()
 
     def __init__(
         self,
         api_key: str,
-        model: str,
+        model: str = "gemini-2.5-flash",
     ) -> None:
 
         if not api_key:
@@ -38,43 +30,11 @@ class GeminiLLM(BaseLLM):
                 "GEMINI_API_KEY is required."
             )
 
-        self.model = model
+        self.model = model or "gemini-2.5-flash"
 
         self.client = genai.Client(
             api_key=api_key
         )
-
-    def _wait_for_slot(self) -> None:
-        """Block until a request slot is available."""
-        with self._lock:
-            now = time.monotonic()
-
-            # Purge timestamps older than the window.
-            while (
-                self._timestamps
-                and self._timestamps[0]
-                <= now - self._WINDOW
-            ):
-                self._timestamps.popleft()
-
-            if len(self._timestamps) >= self._RPM:
-                # Wait until the oldest call exits
-                # the window.
-                wait = (
-                    self._timestamps[0]
-                    + self._WINDOW
-                    - now
-                    + 0.5  # small buffer
-                )
-            else:
-                wait = 0.0
-
-            self._timestamps.append(
-                now + wait
-            )
-
-        if wait > 0:
-            time.sleep(wait)
 
     def generate(
         self,
@@ -83,9 +43,6 @@ class GeminiLLM(BaseLLM):
 
         models_to_try = [
             self.model,
-            "gemini-3.1-flash-lite",
-            "gemini-3.5-flash-lite",
-            "gemini-3.7-flash",
             "gemini-2.5-flash",
         ]
         # De-duplicate preserving order
@@ -119,7 +76,7 @@ class GeminiLLM(BaseLLM):
                         )
                 except Exception as exc:
                     last_exc = exc
-                    time.sleep(0.5 * (attempt + 1))
+                    time.sleep(0.3 * (attempt + 1))
 
         if last_exc:
             raise last_exc

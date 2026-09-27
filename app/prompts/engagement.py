@@ -107,60 +107,52 @@ ALL AVAILABLE GROUNDED FACTS:
 
 RULES:
 
-1. The PRIMARY SIGNAL must drive the message.
+1. The PRIMARY SIGNAL must drive the message. Translate technical regulation IDs or raw metric numbers into actual real-world clinical/business implications.
 
 2. Do not mention every available fact.
 
-3. Use the supporting facts only when they strengthen
-   the primary signal.
+3. Use the supporting facts only when they strengthen the primary signal.
 
 4. Every factual claim must be supported by the supplied facts.
 
-5. Never invent:
-   - numbers
-   - prices
-   - dates
-   - offers
-   - statistics
-   - availability
-   - competitors
-   - customer history
-   - research findings
-   - URLs
+5. Never invent or hallucinate:
+   - research studies, sample sizes (e.g. n=2100), or journal citations not present in supplied facts
+   - numbers, prices, dates, or offers not in supplied facts
+   - statistics, availability, competitors, customer history, or URLs
 
-6. Make "why now" obvious from the trigger and signal.
+6. "WHY NOW" GROUNDING (CRITICAL):
+   Make the immediate reason for contacting obvious right in the message (e.g., upcoming deadline, approaching event, lapse in schedule, or recent performance shift).
 
-7. Make the message specific to this merchant/customer.
+7. ENGAGEMENT LEVERS (LOSS AVERSION & CURIOSITY):
+   Use loss aversion (what is at risk if delayed, such as lost customer leads, compliance risk, or missed slots) or a curiosity hook to compel an immediate reply.
 
-8. Use the category's natural vocabulary and tone:
-   - For dentists: use clinical/peer tone, address medical professionals with "Dr." prefix when appropriate.
+8. Make the message specific to this merchant/customer. Use exact grounded names, dates, items, and available slots provided in facts.
+
+9. Use the category's natural vocabulary and tone:
+   - For dentists: use clinical/peer tone, address medical professionals with "Dr." prefix when appropriate. Translate regulation codes into concrete dental patient care/record compliance steps.
    - For salons: warm, friendly, practical.
    - For restaurants: operator-to-operator.
    - For gyms: coaching, motivational.
    - For pharmacies: trustworthy, precise.
 
-9. Prefer concrete language over generic marketing language.
+10. Prefer concrete language over generic marketing jargon.
 
-10. The `cta` field in JSON output MUST be EXACTLY one of:
+11. The `cta` field in JSON output MUST be EXACTLY one of:
     "open_ended", "binary_yes_no", "multi_choice_slot", "action".
     Set `cta` to "{brief.cta}". Put any conversational question or prompt in `body`.
 
-11. Do not ask multiple questions.
+12. Do not ask multiple questions.
 
-12. If the user is already ready to act, do not ask another
-    qualification question.
+13. If the user is already ready to act, do not ask another qualification question.
 
-13. For customer-facing messages, never expose internal
-    analytics or merchant-only information.
+14. For customer-facing messages, never expose internal analytics or merchant-only information.
 
-14. Language preference:
+15. Language preference:
     If LANGUAGE PREFERENCE is "hi-en mix", use natural Hindi-English code-mix (Hinglish) where appropriate.
 
-15. Keep the WhatsApp message concise and natural.
+16. Keep the WhatsApp message concise, high-converting, and natural.
 
-16. `used_fact_ids` must contain only supplied fact IDs.
-
-17. The primary fact ID must be included in `used_fact_ids`.
+17. `used_fact_ids` must contain only supplied fact IDs. The primary fact ID must be included in `used_fact_ids`.
 
 Return only the structured response.
 """.strip()

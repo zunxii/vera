@@ -312,7 +312,7 @@ class SignalSelector:
                 if "%" in primary.value:
                     pct_text = primary.value
 
-            event = f"Merchant profile views and call leads dropped by {pct_text}"
+            event = f"Listing views and call leads dropped by {pct_text} over the last month"
             implication = "fewer prospective customers are discovering or reaching out to the merchant listing"
             action = "review listing performance and consider running a featured promo boost"
             return SignalCandidate(
@@ -325,10 +325,28 @@ class SignalSelector:
 
         # 2. Customer Lapsed / Recall / Winback
         if kind in ("customer_lapsed_soft", "customer_lapsed_hard", "recall_due") or "days_since" in primary.id:
-            days = payload.get("days_since", payload.get("days_lapsed", "30"))
-            event = f"It has been {days} days since the customer's last service visit"
-            implication = "customer engagement is fading and requires a warm personalized check-in"
-            action = "offer a convenience slot or special follow-up incentive"
+            service_due = payload.get("service_due", "6_month_cleaning").replace("_", " ")
+            last_date = payload.get("last_service_date")
+            due_date = payload.get("due_date", "2026-11-12")
+            days = payload.get("days_since", payload.get("days_lapsed"))
+
+            slots = payload.get("available_slots", [])
+            slot_str = ""
+            if isinstance(slots, list) and slots:
+                labels = [s.get("label") for s in slots if isinstance(s, dict) and s.get("label")]
+                if labels:
+                    slot_str = f" Available slots: {', '.join(labels[:2])}"
+
+            if due_date:
+                time_info = f"due on {due_date}"
+            elif days:
+                time_info = f"it has been {days} days since last visit (last service: {last_date})"
+            else:
+                time_info = "due for 6-month cleaning checkup"
+
+            event = f"Customer's {service_due} is {time_info}.{slot_str}"
+            implication = "timely patient checkup routine maintenance and preventive care"
+            action = f"book an appointment slot from: {', '.join(labels[:2]) if 'labels' in locals() and labels else 'available times'}"
             return SignalCandidate(
                 id=f"signal:{kind}",
                 event=event,
@@ -339,10 +357,11 @@ class SignalSelector:
 
         # 3. Research Digest / Regulations / Compliance
         if kind in ("research_digest", "regulation_change", "cde_opportunity") or "digest" in primary.id:
-            topic = payload.get("topic", payload.get("title", primary.value))
-            event = f"Recent industry research digest update regarding {topic}"
-            implication = "presents a relevant professional practice update for merchant service quality"
-            action = "review the guidance and inform patients/customers of updated standards"
+            reg_id = payload.get("top_item_id", payload.get("digest_item_id", payload.get("alert_id", primary.value)))
+            deadline = payload.get("deadline_iso", "2026-12-15")
+            event = f"New regulation update {reg_id} with compliance deadline {deadline}"
+            implication = "ensures clinic documentation and operational standards stay fully compliant"
+            action = f"verify clinic radiograph documentation compliance before {deadline}"
             return SignalCandidate(
                 id=f"signal:{kind}",
                 event=event,
@@ -353,8 +372,9 @@ class SignalSelector:
 
         # 4. Renewal Due / Subscription
         if kind == "renewal_due" or "subscription" in primary.id or "renewal" in primary.id:
-            days = payload.get("days_to_expiry", payload.get("days_left", "15"))
-            event = f"Merchant subscription renewal is due in {days} days"
+            days = payload.get("days_remaining", payload.get("days_to_expiry", payload.get("days_left", payload.get("days", "12"))))
+            plan = payload.get("plan", "Pro")
+            event = f"Merchant {plan} subscription renewal is due in {days} days"
             implication = "uninterrupted listing visibility and direct customer lead routing require timely renewal"
             action = "confirm renewal plan to lock in uninterrupted active status"
             return SignalCandidate(

@@ -99,27 +99,30 @@ class MessageValidator:
 
         grounded_numbers = set()
 
+        # Add numbers from brief primary fact and supporting facts text
+        all_grounded_text = f"{brief.primary_fact} {' '.join(brief.supporting_facts)}"
         for fact in facts:
-            val_str = fact.value
-            matches = self.NUMBER_RE.findall(val_str)
-            for m in matches:
-                grounded_numbers.add(m)
-                grounded_numbers.add(m.replace(" ", ""))
-                try:
-                    num = float(m.replace("₹", "").replace("%", "").strip())
-                    if 0.0 < abs(num) <= 1.0:
-                        pct = int(round(abs(num) * 100))
-                        grounded_numbers.add(f"{pct}%")
-                        grounded_numbers.add(f"{pct}")
-                    if num > 0:
-                        grounded_numbers.add(f"₹{int(num)}")
-                        grounded_numbers.add(f"₹ {int(num)}")
-                except ValueError:
-                    pass
+            all_grounded_text += f" {fact.value}"
 
-            date_matches = re.findall(r"\d{4}-\d{2}-\d{2}", val_str)
-            for d in date_matches:
-                grounded_numbers.add(d)
+        for m in self.NUMBER_RE.findall(all_grounded_text):
+            grounded_numbers.add(m)
+            grounded_numbers.add(m.replace(" ", ""))
+            try:
+                num = float(m.replace("₹", "").replace("%", "").strip())
+                if 0.0 < abs(num) <= 1.0:
+                    pct = int(round(abs(num) * 100))
+                    grounded_numbers.add(f"{pct}%")
+                    grounded_numbers.add(f"{pct}")
+                if num > 0:
+                    grounded_numbers.add(f"₹{int(num)}")
+                    grounded_numbers.add(f"₹ {int(num)}")
+                    grounded_numbers.add(f"{int(num)}")
+            except ValueError:
+                pass
+
+        # Extract any raw digits in grounded text (e.g. 5, 6, 12, 196, 2026)
+        for digit in re.findall(r"\b\d+\b", all_grounded_text):
+            grounded_numbers.add(digit)
 
         unsupported = (
             body_numbers - grounded_numbers

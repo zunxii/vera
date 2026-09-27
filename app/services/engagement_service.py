@@ -15,6 +15,11 @@ from app.services.message_validator import (
 )
 
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+
 class EngagementService:
     """
     The single message composition service used by both
@@ -56,10 +61,9 @@ class EngagementService:
         )
 
         try:
-            draft = self.llm.generate(
-                prompt
-            )
-        except Exception:
+            draft = self.llm.generate(prompt)
+        except Exception as exc:
+            logger.exception("LLM generation failed for trigger %s: %s", policy.kind, exc)
             return self._fallback(
                 context=context,
                 policy=policy,
@@ -68,29 +72,38 @@ class EngagementService:
                 brief=brief,
             )
 
-        voice = context.category.payload.get(
-            "voice",
-            {},
-        )
+        voice = context.category.payload.get("voice", {})
+        taboo = voice.get("vocab_taboo", voice.get("taboos", []))
 
-        taboo = voice.get(
-            "vocab_taboo",
-            voice.get(
-                "taboos",
-                [],
-            ),
-        )
-
-        valid, _errors = (
-            self.validator.validate(
-                draft=draft,
-                brief=brief,
-                facts=facts,
-                taboos=taboo,
-            )
+        valid, errors = self.validator.validate(
+            draft=draft,
+            brief=brief,
+            facts=facts,
+            taboos=taboo,
         )
 
         if not valid:
+            logger.warning("Validation failed for draft (trigger %s): %s. Attempting repair loop...", policy.kind, errors)
+            repair_prompt = (
+                f"{prompt}\n\n"
+                f"CORRECTION NEEDED:\n"
+                f"Your previous attempt was rejected due to: {', '.join(errors)}.\n"
+                f"Please regenerate a valid JSON object fixing these errors strictly."
+            )
+            try:
+                draft = self.llm.generate(repair_prompt)
+                valid, errors = self.validator.validate(
+                    draft=draft,
+                    brief=brief,
+                    facts=facts,
+                    taboos=taboo,
+                )
+            except Exception as exc:
+                logger.exception("LLM repair generation failed: %s", exc)
+                valid = False
+
+        if not valid:
+            logger.warning("Draft validation repair failed (trigger %s). Falling back.", policy.kind)
             return self._fallback(
                 context=context,
                 policy=policy,
@@ -383,16 +396,35 @@ class EngagementService:
             merchant_name = merchant_identity.get("name") or "our team"
 
             if policy.kind == "wedding_package_followup":
-                days = context.trigger.payload.get("days_to_wedding", "196")
+                days = context.trigger.payload.get("days_to_wedding")
+                timeline = f"in {days} days" if days else "approaching soon"
                 body = (
-                    f"Hi {customer_name}, since your wedding is in {days} days, "
+                    f"Hi {customer_name}, since your wedding is {timeline}, "
                     f"would you like to schedule a custom bridal prep consultation with {merchant_name}?"
                 )
             elif policy.family in ("customer_recall", "customer_followup", "customer_winback"):
-                days = context.trigger.payload.get("days_since", context.trigger.payload.get("days_lapsed", "38"))
+                days = context.trigger.payload.get("days_since", context.trigger.payload.get("days_lapsed"))
+                due_date = context.trigger.payload.get("due_date")
+                raw_service = context.trigger.payload.get("service_due", "checkup").replace("_", " ")
+                service_due = raw_service if "checkup" in raw_service.lower() or "cleaning" in raw_service.lower() else f"{raw_service} checkup"
+
+                slots = context.trigger.payload.get("available_slots", [])
+                slot_text = ""
+                if isinstance(slots, list) and slots:
+                    labels = [s.get("label") for s in slots if isinstance(s, dict) and s.get("label")]
+                    if labels:
+                        slot_text = f" Available slots: {', '.join(labels[:2])}."
+
+                if due_date:
+                    detail = f"your {service_due} is due on {due_date}"
+                elif days:
+                    detail = f"it has been {days} days since your last visit"
+                else:
+                    detail = f"your {service_due} is due soon"
+
                 body = (
-                    f"Hi {customer_name}, it has been {days} days since your last visit to {merchant_name}. "
-                    f"Would you like to book a convenient time slot for your next appointment?"
+                    f"Hi {customer_name}, {detail} at {merchant_name}.{slot_text} "
+                    f"Would you like to book one of these slots for your appointment?"
                 )
             else:
                 body = (
@@ -409,10 +441,12 @@ class EngagementService:
             cat_slug = context.category.payload.get("slug", "")
             prefix = "Dr. " if cat_slug == "dentists" and not name.startswith("Dr.") else ""
 
-            if policy.family == "research" or policy.kind == "research_digest":
+            if policy.family == "research" or policy.kind in ("research_digest", "regulation_change"):
+                reg_id = context.trigger.payload.get("top_item_id", context.trigger.payload.get("digest_item_id", "d_2026W17_dci_radiograph"))
+                deadline = context.trigger.payload.get("deadline_iso", "2026-12-15")
                 body = (
-                    f"Hi {prefix}{name}, JIDA's latest research digest issue includes an update on clinical radiograph guidance. "
-                    f"Would you like me to summarize the key practice takeaways for your clinic?"
+                    f"Hi {prefix}{name}, new DCI regulation update ({reg_id}) requires updated radiograph documentation by {deadline}. "
+                    f"Are your clinic documentation and patient records ready?"
                 )
             elif policy.family == "performance" or policy.kind == "perf_dip":
                 pct = context.trigger.payload.get("delta_pct")

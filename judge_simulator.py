@@ -37,9 +37,9 @@ if _env_file.exists():
                 os.environ[_key] = _val
 
 BOT_URL = os.getenv("BOT_URL", "http://localhost:8080")
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq" if os.getenv("GROQ_API_KEY") else ("gemini" if os.getenv("GEMINI_API_KEY") else "openai"))
-LLM_API_KEY = os.getenv("LLM_API_KEY") or os.getenv("GROQ_API_KEY") or os.getenv("GEMINI_API_KEY") or os.getenv("OPENAI_API_KEY") or os.getenv("ANTHROPIC_API_KEY") or ""
-LLM_MODEL = os.getenv("LLM_MODEL", "")
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq")
+LLM_API_KEY = os.getenv("LLM_API_KEY") or os.getenv("GROQ_API_KEY") or ""
+LLM_MODEL = os.getenv("LLM_MODEL", "openai/gpt-oss-120b")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 TEST_SCENARIO = os.getenv("TEST_SCENARIO", "all")
 
@@ -288,7 +288,7 @@ class DeepSeekProvider(LLMProvider):
 class GroqProvider(LLMProvider):
     def __init__(self, api_key: str, model: str = ""):
         self.api_key = api_key
-        self.model = model or "qwen/qwen3.8-27b"
+        self.model = model or "openai/gpt-oss-120b"
 
     def name(self) -> str:
         return f"Groq ({self.model})"
@@ -301,9 +301,9 @@ class GroqProvider(LLMProvider):
 
         models_to_try = [
             self.model,
-            "qwen/qwen3.8-27b",
             "openai/gpt-oss-120b",
             "openai/gpt-oss-20b",
+            "qwen/qwen3.8-27b",
         ]
         seen = set()
         models = [m for m in models_to_try if not (m in seen or seen.add(m))]
@@ -313,35 +313,43 @@ class GroqProvider(LLMProvider):
             from groq import Groq
             client = Groq(api_key=self.api_key, timeout=20.0)
             for m in models:
-                try:
-                    resp = client.chat.completions.create(
-                        model=m,
-                        messages=messages,
-                        temperature=0.2,
-                        max_tokens=1500,
-                    )
-                    content = resp.choices[0].message.content
-                    if content:
-                        return content
-                except Exception:
-                    continue
+                for attempt in range(3):
+                    try:
+                        resp = client.chat.completions.create(
+                            model=m,
+                            messages=messages,
+                            temperature=0.2,
+                            max_tokens=1500,
+                        )
+                        content = resp.choices[0].message.content
+                        if content:
+                            return content
+                    except Exception as e:
+                        err_str = str(e)
+                        if "429" in err_str or "rate" in err_str.lower():
+                            time.sleep(1.5 * (attempt + 1))
+                        continue
         except ImportError:
             pass
 
         # Fallback to HTTP REST
         for m in models:
-            req = urlrequest.Request(
-                "https://api.groq.com/openai/v1/chat/completions",
-                data=json.dumps({"model": m, "messages": messages,
-                                "temperature": 0.2, "max_tokens": 1500}).encode("utf-8"),
-                headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
-            )
-            try:
-                resp = urlrequest.urlopen(req, timeout=TIMEOUT_LLM)
-                data = json.loads(resp.read().decode("utf-8"))
-                return data["choices"][0]["message"]["content"]
-            except Exception:
-                continue
+            for attempt in range(3):
+                req = urlrequest.Request(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    data=json.dumps({"model": m, "messages": messages,
+                                    "temperature": 0.2, "max_tokens": 1500}).encode("utf-8"),
+                    headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+                )
+                try:
+                    resp = urlrequest.urlopen(req, timeout=TIMEOUT_LLM)
+                    data = json.loads(resp.read().decode("utf-8"))
+                    return data["choices"][0]["message"]["content"]
+                except Exception as e:
+                    err_str = str(e)
+                    if "429" in err_str or "rate" in err_str.lower():
+                        time.sleep(1.5 * (attempt + 1))
+                    continue
 
         return ""
 
